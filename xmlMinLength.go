@@ -8,14 +8,30 @@
 
 package xgen
 
-import "encoding/xml"
+import (
+	"encoding/xml"
+	"strconv"
+)
+
+func (opt *Options) OnMinLength(ele xml.StartElement, protoTree []interface{}) (err error) {
+	for _, attr := range ele.Attr {
+		if attr.Name.Local == "value" {
+			if opt.SimpleType.Peek() != nil {
+				opt.SimpleType.Peek().(*SimpleType).Restriction.MinLength, _ = strconv.Atoi(attr.Value)
+				opt.SimpleType.Peek().(*SimpleType).Restriction.hasMinLength = true
+			}
+		}
+	}
+
+	return
+}
 
 // EndMinLength handles parsing event on the minLength end elements. MinLength
 // specifies the minimum number of characters or list items allowed. Must be
 // equal to or greater than zero.
 func (opt *Options) EndMinLength(ele xml.EndElement, protoTree []interface{}) (err error) {
 	if opt.SimpleType.Len() > 0 && opt.Element.Len() > 0 {
-		if opt.Element.Peek().(*Element).Type, err = opt.GetValueType(opt.SimpleType.Pop().(*SimpleType).Base, opt.ProtoTree); err != nil {
+		if opt.Element.Peek().(*Element).Type, err = opt.GetValueType(opt.SimpleType.Peek().(*SimpleType).Base, opt.ProtoTree); err != nil {
 			return
 		}
 		opt.CurrentEle = ""

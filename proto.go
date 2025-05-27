@@ -8,7 +8,9 @@
 
 package xgen
 
-import "regexp"
+import (
+	"regexp"
+)
 
 // SimpleType definitions provide for constraining character information item
 // [children] of element and attribute information items.
@@ -32,15 +34,16 @@ type SimpleType struct {
 // mechanism of element substitution groups.
 // https://www.w3.org/TR/xmlschema-1/#cElement_Declarations
 type Element struct {
-	Doc      string
-	Name     string
-	Wildcard bool
-	Type     string
-	Abstract bool
-	Plural   bool
-	Optional bool
-	Nillable bool
-	Default  string
+	Doc         string
+	Name        string
+	Wildcard    bool
+	Type        string
+	Abstract    bool
+	Plural      bool
+	Optional    bool
+	Nillable    bool
+	Default     string
+	Restriction Restriction
 }
 
 // Attribute declarations provide for: Local validation of attribute
@@ -48,12 +51,13 @@ type Element struct {
 // or fixed values for attribute information items.
 // https://www.w3.org/TR/xmlschema-1/structures.html#element-attribute
 type Attribute struct {
-	Name     string
-	Doc      string
-	Type     string
-	Plural   bool
-	Default  string
-	Optional bool
+	Name        string
+	Doc         string
+	Type        string
+	Plural      bool
+	Default     string
+	Optional    bool
+	Restriction Restriction
 }
 
 // ComplexType definitions are identified by their {name} and {target
@@ -127,10 +131,12 @@ type AttributeGroup struct {
 // attributes. Restriction on XML elements are called facets.
 // https://www.w3.org/TR/xmlschema-1/structures.html#element-restriction
 type Restriction struct {
-	Doc                  string
-	Precision            int
-	Enum                 []string
-	Min, Max             float64
-	MinLength, MaxLength int
-	Pattern              *regexp.Regexp
+	Doc                        string
+	Precision                  int
+	Enum                       []string
+	Min, Max                   float64
+	hasMin, hasMax             bool
+	MinLength, MaxLength       int
+	hasMinLength, hasMaxLength bool
+	Pattern                    *regexp.Regexp
 }

@@ -8,14 +8,28 @@
 
 package xgen
 
-import "encoding/xml"
+import (
+	"encoding/xml"
+	"regexp"
+)
+
+func (opt *Options) OnPattern(ele xml.StartElement, protoTree []interface{}) (err error) {
+	for _, attr := range ele.Attr {
+		if attr.Name.Local == "value" {
+			if opt.SimpleType.Peek() != nil {
+				opt.SimpleType.Peek().(*SimpleType).Restriction.Pattern, _ = regexp.Compile(attr.Value)
+			}
+		}
+	}
+
+	return nil
+}
 
 // EndPattern handles parsing event on the pattern end elements. Pattern
 // defines the exact sequence of characters that are acceptable.
 func (opt *Options) EndPattern(ele xml.EndElement, protoTree []interface{}) (err error) {
 	if opt.Attribute.Len() > 0 && opt.SimpleType.Peek() != nil {
-		opt.Attribute.Peek().(*Attribute).Type, err = opt.GetValueType(opt.SimpleType.Pop().(*SimpleType).Base, opt.ProtoTree)
-		if err != nil {
+		if opt.Attribute.Peek().(*Attribute).Type, err = opt.GetValueType(opt.SimpleType.Pop().(*SimpleType).Base, opt.ProtoTree); err != nil {
 			return
 		}
 		opt.CurrentEle = ""
