@@ -113,7 +113,7 @@ func (gen *CodeGenerator) GenRust() error {
 	defer f.Close()
 	var imports = `
 use regex::Regex;
-use iso20022_common::{common::*, ValidationError};
+use crate::error::*;
 use serde::{Deserialize, Serialize};`
 	source := []byte(fmt.Sprintf("%s\n\n%s", copyright, imports+gen.Field))
 	f.Write(source)
@@ -353,7 +353,7 @@ func (gen *CodeGenerator) RustSimpleType(v *SimpleType) {
 	if len(v.Restriction.Enum) > 0 && v.Base == "String" {
 		fieldContent := ""
 		for _, enumValue := range v.Restriction.Enum {
-			fieldContent += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tCode%s,\n", enumValue, strings.ToUpper(enumValue))
+			fieldContent += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tCode%s,\n", enumValue, strings.Replace(strings.ToUpper(enumValue), ".", "", -1))
 		}
 		gen.StructAST[v.Name] = fieldContent
 		enumName := genRustStructName(v.Name, true)
