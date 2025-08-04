@@ -111,11 +111,10 @@ func (gen *CodeGenerator) GenRust() error {
 		return err
 	}
 	defer f.Close()
-	var imports = `
-use regex::Regex;
-use crate::error::*;
+	var imports = `use crate::parse_result::{ErrorCollector, ParserConfig};
+use crate::validation::{Validate, helpers};
 use serde::{Deserialize, Serialize};`
-	source := []byte(fmt.Sprintf("%s\n\n%s", copyright, imports+gen.Field))
+	source := []byte(fmt.Sprintf("%s\n%s\n%s", copyright, imports, gen.Field))
 	f.Write(source)
 	return err
 }
@@ -175,8 +174,193 @@ func escapeRustString(s string) string {
 	return s
 }
 
-// Helper function to generate validation code for each restriction type
-func getValidationCode(variable string, fieldName string, fieldType string, restriction *Restriction) string {
+// Helper function to generate validation code with error collection for string types
+func genStringValidationWithPath(fieldName string, xmlName string, restriction *Restriction, optional bool, plural bool) string {
+	if restriction == nil {
+		return ""
+	}
+
+	validations := ""
+
+	// Generate length validation
+	if restriction.hasMinLength || restriction.hasMaxLength {
+		minStr := "None"
+		maxStr := "None"
+		if restriction.hasMinLength {
+			minStr = fmt.Sprintf("Some(%d)", restriction.MinLength)
+		}
+		if restriction.hasMaxLength {
+			maxStr = fmt.Sprintf("Some(%d)", restriction.MaxLength)
+		}
+
+		if plural {
+			if optional {
+				validations += fmt.Sprintf("if let Some(ref vec) = self.%s {\n", fieldName)
+				validations += fmt.Sprintf("\tfor item in vec {\n")
+				validations += fmt.Sprintf("\t\thelpers::validate_length(\n")
+				validations += fmt.Sprintf("\t\t\titem,\n")
+				validations += fmt.Sprintf("\t\t\t\"%s\",\n", xmlName)
+				validations += fmt.Sprintf("\t\t\t%s,\n", minStr)
+				validations += fmt.Sprintf("\t\t\t%s,\n", maxStr)
+				validations += fmt.Sprintf("\t\t\t&helpers::child_path(path, \"%s\"),\n", xmlName)
+				validations += fmt.Sprintf("\t\t\tconfig,\n")
+				validations += fmt.Sprintf("\t\t\tcollector,\n")
+				validations += fmt.Sprintf("\t\t);\n")
+				validations += fmt.Sprintf("\t}\n")
+				validations += fmt.Sprintf("}\n")
+			} else {
+				validations += fmt.Sprintf("for item in &self.%s {\n", fieldName)
+				validations += fmt.Sprintf("\thelpers::validate_length(\n")
+				validations += fmt.Sprintf("\t\titem,\n")
+				validations += fmt.Sprintf("\t\t\"%s\",\n", xmlName)
+				validations += fmt.Sprintf("\t\t%s,\n", minStr)
+				validations += fmt.Sprintf("\t\t%s,\n", maxStr)
+				validations += fmt.Sprintf("\t\t&helpers::child_path(path, \"%s\"),\n", xmlName)
+				validations += fmt.Sprintf("\t\tconfig,\n")
+				validations += fmt.Sprintf("\t\tcollector,\n")
+				validations += fmt.Sprintf("\t);\n")
+				validations += fmt.Sprintf("}\n")
+			}
+		} else {
+			if optional {
+				validations += fmt.Sprintf("if let Some(ref val) = self.%s {\n", fieldName)
+				validations += fmt.Sprintf("\thelpers::validate_length(\n")
+				validations += fmt.Sprintf("\t\tval,\n")
+				validations += fmt.Sprintf("\t\t\"%s\",\n", xmlName)
+				validations += fmt.Sprintf("\t\t%s,\n", minStr)
+				validations += fmt.Sprintf("\t\t%s,\n", maxStr)
+				validations += fmt.Sprintf("\t\t&helpers::child_path(path, \"%s\"),\n", xmlName)
+				validations += fmt.Sprintf("\t\tconfig,\n")
+				validations += fmt.Sprintf("\t\tcollector,\n")
+				validations += fmt.Sprintf("\t);\n")
+				validations += fmt.Sprintf("}\n")
+			} else {
+				validations += fmt.Sprintf("helpers::validate_length(\n")
+				validations += fmt.Sprintf("\t&self.%s,\n", fieldName)
+				validations += fmt.Sprintf("\t\"%s\",\n", xmlName)
+				validations += fmt.Sprintf("\t%s,\n", minStr)
+				validations += fmt.Sprintf("\t%s,\n", maxStr)
+				validations += fmt.Sprintf("\t&helpers::child_path(path, \"%s\"),\n", xmlName)
+				validations += fmt.Sprintf("\tconfig,\n")
+				validations += fmt.Sprintf("\tcollector,\n")
+				validations += fmt.Sprintf(");\n")
+			}
+		}
+	}
+
+	// Generate pattern validation
+	if restriction.Pattern != nil {
+		patternStr := escapeRustString(restriction.Pattern.String())
+		if plural {
+			if optional {
+				validations += fmt.Sprintf("if let Some(ref vec) = self.%s {\n", fieldName)
+				validations += fmt.Sprintf("\tfor item in vec {\n")
+				validations += fmt.Sprintf("\t\thelpers::validate_pattern(\n")
+				validations += fmt.Sprintf("\t\t\titem,\n")
+				validations += fmt.Sprintf("\t\t\t\"%s\",\n", xmlName)
+				validations += fmt.Sprintf("\t\t\t\"%s\",\n", patternStr)
+				validations += fmt.Sprintf("\t\t\t&helpers::child_path(path, \"%s\"),\n", xmlName)
+				validations += fmt.Sprintf("\t\t\tconfig,\n")
+				validations += fmt.Sprintf("\t\t\tcollector,\n")
+				validations += fmt.Sprintf("\t\t);\n")
+				validations += fmt.Sprintf("\t}\n")
+				validations += fmt.Sprintf("}\n")
+			} else {
+				validations += fmt.Sprintf("for item in &self.%s {\n", fieldName)
+				validations += fmt.Sprintf("\thelpers::validate_pattern(\n")
+				validations += fmt.Sprintf("\t\titem,\n")
+				validations += fmt.Sprintf("\t\t\"%s\",\n", xmlName)
+				validations += fmt.Sprintf("\t\t\"%s\",\n", patternStr)
+				validations += fmt.Sprintf("\t\t&helpers::child_path(path, \"%s\"),\n", xmlName)
+				validations += fmt.Sprintf("\t\tconfig,\n")
+				validations += fmt.Sprintf("\t\tcollector,\n")
+				validations += fmt.Sprintf("\t);\n")
+				validations += fmt.Sprintf("}\n")
+			}
+		} else {
+			if optional {
+				validations += fmt.Sprintf("if let Some(ref val) = self.%s {\n", fieldName)
+				validations += fmt.Sprintf("\thelpers::validate_pattern(\n")
+				validations += fmt.Sprintf("\t\tval,\n")
+				validations += fmt.Sprintf("\t\t\"%s\",\n", xmlName)
+				validations += fmt.Sprintf("\t\t\"%s\",\n", patternStr)
+				validations += fmt.Sprintf("\t\t&helpers::child_path(path, \"%s\"),\n", xmlName)
+				validations += fmt.Sprintf("\t\tconfig,\n")
+				validations += fmt.Sprintf("\t\tcollector,\n")
+				validations += fmt.Sprintf("\t);\n")
+				validations += fmt.Sprintf("}\n")
+			} else {
+				validations += fmt.Sprintf("helpers::validate_pattern(\n")
+				validations += fmt.Sprintf("\t&self.%s,\n", fieldName)
+				validations += fmt.Sprintf("\t\"%s\",\n", xmlName)
+				validations += fmt.Sprintf("\t\"%s\",\n", patternStr)
+				validations += fmt.Sprintf("\t&helpers::child_path(path, \"%s\"),\n", xmlName)
+				validations += fmt.Sprintf("\tconfig,\n")
+				validations += fmt.Sprintf("\tcollector,\n")
+				validations += fmt.Sprintf(");\n")
+			}
+		}
+	}
+
+	return validations
+}
+
+// Helper function to generate validation for custom types with error collection
+func genCustomTypeValidationWithPath(fieldName string, xmlName string, fieldType string, optional bool, plural bool) string {
+	// Only call validate_with_path on custom types
+	if fieldType == "String" || fieldType == "i32" || fieldType == "f64" || fieldType == "bool" {
+		return ""
+	}
+
+	validations := ""
+
+	if plural {
+		if optional {
+			validations += fmt.Sprintf("if let Some(ref vec) = self.%s {\n", fieldName)
+			validations += fmt.Sprintf("\tif config.validate_optional_fields {\n")
+			validations += fmt.Sprintf("\t\tfor item in vec {\n")
+			validations += fmt.Sprintf("\t\t\titem.validate(\n")
+			validations += fmt.Sprintf("\t\t\t\t&helpers::child_path(path, \"%s\"),\n", xmlName)
+			validations += fmt.Sprintf("\t\t\t\tconfig,\n")
+			validations += fmt.Sprintf("\t\t\t\tcollector,\n")
+			validations += fmt.Sprintf("\t\t\t);\n")
+			validations += fmt.Sprintf("\t\t}\n")
+			validations += fmt.Sprintf("\t}\n")
+			validations += fmt.Sprintf("}\n")
+		} else {
+			validations += fmt.Sprintf("for item in &self.%s {\n", fieldName)
+			validations += fmt.Sprintf("\titem.validate(\n")
+			validations += fmt.Sprintf("\t\t&helpers::child_path(path, \"%s\"),\n", xmlName)
+			validations += fmt.Sprintf("\t\tconfig,\n")
+			validations += fmt.Sprintf("\t\tcollector,\n")
+			validations += fmt.Sprintf("\t);\n")
+			validations += fmt.Sprintf("}\n")
+		}
+	} else {
+		if optional {
+			validations += fmt.Sprintf("if let Some(ref val) = self.%s {\n", fieldName)
+			validations += fmt.Sprintf("\tif config.validate_optional_fields {\n")
+			validations += fmt.Sprintf("\t\tval.validate(\n")
+			validations += fmt.Sprintf("\t\t\t&helpers::child_path(path, \"%s\"),\n", xmlName)
+			validations += fmt.Sprintf("\t\t\tconfig,\n")
+			validations += fmt.Sprintf("\t\t\tcollector,\n")
+			validations += fmt.Sprintf("\t\t);\n")
+			validations += fmt.Sprintf("\t}\n")
+			validations += fmt.Sprintf("}\n")
+		} else {
+			validations += fmt.Sprintf("self.%s.validate(\n", fieldName)
+			validations += fmt.Sprintf("\t&helpers::child_path(path, \"%s\"),\n", xmlName)
+			validations += fmt.Sprintf("\tconfig,\n")
+			validations += fmt.Sprintf("\tcollector,\n")
+			validations += fmt.Sprintf(");\n")
+		}
+	}
+
+	return validations
+}
+
+// Old validation code generation for backward compatibility validate() method
+func getOldValidationCode(variable string, fieldName string, fieldType string, restriction *Restriction) string {
 	validations := ""
 
 	// Handle minLength and maxLength for string types
@@ -232,13 +416,13 @@ func getValidationCode(variable string, fieldName string, fieldType string, rest
 	return validations
 }
 
-// Helper function to generate validation for built-in types with restrictions
-func genBuiltInValidation(fieldName string, fieldType string, restriction *Restriction, plural bool, optional bool) string {
+// Helper function to generate old validation for built-in types
+func genBuiltInOldValidation(fieldName string, fieldType string, restriction *Restriction, plural bool, optional bool) string {
 	validations := ""
 
 	// Handle plural (Vec) case for built-in types
 	if plural {
-		v := getValidationCode("item", fieldName, fieldType, restriction)
+		v := getOldValidationCode("item", fieldName, fieldType, restriction)
 		if len(v) > 0 {
 			if optional {
 				// Handle Option<Vec<T>> for built-in types
@@ -251,13 +435,13 @@ func genBuiltInValidation(fieldName string, fieldType string, restriction *Restr
 	} else {
 		// Handle Option<T> case
 		if optional {
-			v := getValidationCode("val", fieldName, fieldType, restriction)
+			v := getOldValidationCode("val", fieldName, fieldType, restriction)
 			if len(v) > 0 {
 				validations += fmt.Sprintf("if let Some(ref val) = self.%s {\n\t%s\n}\n", fieldName, strings.ReplaceAll(v, "\n", "\n\t"))
 			}
 		} else {
 			// Handle T case
-			v := getValidationCode(fmt.Sprintf("self.%s", fieldName), fieldName, fieldType, restriction)
+			v := getOldValidationCode(fmt.Sprintf("self.%s", fieldName), fieldName, fieldType, restriction)
 			if len(v) > 0 {
 				validations += v + "\n"
 			}
@@ -267,10 +451,10 @@ func genBuiltInValidation(fieldName string, fieldType string, restriction *Restr
 	return validations
 }
 
-// Helper function to handle validation for custom types
-func genCustomTypeValidation(fieldName string, fieldType string, plural bool, optional bool) string {
+// Helper function to handle old validation for custom types
+func genCustomTypeOldValidation(fieldName string, fieldType string, plural bool, optional bool) string {
 	// Only call validate() on custom types, not on built-in types like String
-	if fieldType == "String" || fieldType == "i32" || fieldType == "f64" {
+	if fieldType == "String" || fieldType == "i32" || fieldType == "f64" || fieldType == "bool" {
 		return "" // No validate() call for primitive types
 	}
 
@@ -290,16 +474,25 @@ func genCustomTypeValidation(fieldName string, fieldType string, plural bool, op
 	}
 }
 
-// Main function
-func genRustFieldCode(name string, ftype string, plural bool, optional bool, restriction *Restriction, untagged bool, attibute bool) (string, string) {
+// Main function - returns field content, old validations, new validations, and xml name
+func genRustFieldCode(name string, ftype string, plural bool, optional bool, restriction *Restriction, untagged bool, attibute bool) (string, string, string, string) {
 	fieldName := genRustFieldName(name)
 	fieldType := genRustFieldType(ftype)
-	validations := ""
-
+	oldValidations := ""
+	newValidations := ""
+	
+	// Generate old validation code for backward compatibility
 	if isRustBuiltInType(ftype) && restriction != nil {
-		validations = genBuiltInValidation(fieldName, fieldType, restriction, plural, optional)
+		oldValidations = genBuiltInOldValidation(fieldName, fieldType, restriction, plural, optional)
 	} else {
-		validations = genCustomTypeValidation(fieldName, fieldType, plural, optional)
+		oldValidations = genCustomTypeOldValidation(fieldName, fieldType, plural, optional)
+	}
+
+	// Generate new validation code with error collection
+	if isRustBuiltInType(ftype) && restriction != nil {
+		newValidations = genStringValidationWithPath(fieldName, genRustFieldRename(name), restriction, optional, plural)
+	} else {
+		newValidations = genCustomTypeValidationWithPath(fieldName, genRustFieldRename(name), fieldType, optional, plural)
 	}
 
 	// Adjust field type for Vec and Option cases
@@ -325,17 +518,28 @@ func genRustFieldCode(name string, ftype string, plural bool, optional bool, res
 	}
 	content += fmt.Sprintf(")]\npub %s: %s,", genRustFieldName(name), fieldType)
 
-	return content, validations
+	return content, oldValidations, newValidations, genRustFieldRename(name)
 }
 
-func genRustStructCode(name string, doc string, fieldContent string, validations string, untagged bool) string {
+func genRustStructCode(name string, doc string, fieldContent string, oldValidations string, newValidations string, untagged bool) string {
 	extraTags := ""
 	if untagged {
 		extraTags += "#[serde(transparent) ]\n"
 	}
 
 	content := fmt.Sprintf("\n%s%s%spub struct %s {%s\n}\n", genFieldComment(name, doc, "//"), commonDerives, extraTags, name, strings.ReplaceAll(fieldContent, "\n", "\n\t"))
-	content += fmt.Sprintf("\nimpl %s {\n\tpub fn validate(&self) -> Result<(), ValidationError> {\n\t\t%sOk(())\n\t}\n}\n", name, strings.ReplaceAll(validations, "\n", "\n\t\t"))
+	
+	// Generate Validate trait implementation
+	content += fmt.Sprintf("\nimpl Validate for %s {\n", name)
+	if len(newValidations) > 0 {
+		content += "\tfn validate(&self, path: &str, config: &ParserConfig, collector: &mut ErrorCollector) {\n"
+		content += "\t\t" + strings.ReplaceAll(newValidations, "\n", "\n\t\t")
+		content += "\t}\n}\n"
+	} else {
+		content += "\tfn validate(&self, _path: &str, _config: &ParserConfig, _collector: &mut ErrorCollector) {\n"
+		content += "\t}\n}\n"
+	}
+	
 	return content
 }
 
@@ -343,7 +547,13 @@ func genRustEnumCode(name string, doc string, fieldContent string) string {
 	content := fmt.Sprintf("\n%s%spub enum %s {\n\t#[default]\n", doc, commonDerives, name)
 	content += fieldContent
 	content += "}\n"
-	content += fmt.Sprintf("\nimpl %s {\n\tpub fn validate(&self) -> Result<(), ValidationError> {\n\t\tOk(())\n\t}\n}\n", name)
+	
+	// Generate Validate trait implementation for enum
+	content += fmt.Sprintf("\nimpl Validate for %s {\n", name)
+	content += "\tfn validate(&self, _path: &str, _config: &ParserConfig, _collector: &mut ErrorCollector) {\n"
+	content += "\t\t// Enum validation is typically empty\n"
+	content += "\t}\n}\n"
+	
 	return content
 }
 
@@ -365,25 +575,28 @@ func (gen *CodeGenerator) RustSimpleType(v *SimpleType) {
 // RustComplexType generates code for complex type XML schema in Rust language
 // syntax.
 func (gen *CodeGenerator) RustComplexType(v *ComplexType) {
-	var content, validation string
+	var content, oldValidation, newValidation string
 	for _, attrGroup := range v.AttributeGroup {
 		fieldType := getBasefromSimpleType(trimNSPrefix(attrGroup.Ref), gen.ProtoTree)
-		conts, valids := genRustFieldCode(attrGroup.Name, fieldType, false, false, nil, false, false)
+		conts, oldValids, newValids, _ := genRustFieldCode(attrGroup.Name, fieldType, false, false, nil, false, false)
 		content += conts
-		validation += valids
+		oldValidation += oldValids
+		newValidation += newValids
 	}
 	for _, attribute := range v.Attributes {
 		// fieldType := getBasefromSimpleType(trimNSPrefix(attribute.Type), gen.ProtoTree)
 		fieldType := "String"
-		conts, valids := genRustFieldCode(attribute.Name, fieldType, attribute.Plural, attribute.Optional, nil, false, true)
+		conts, oldValids, newValids, _ := genRustFieldCode(attribute.Name, fieldType, attribute.Plural, attribute.Optional, nil, false, true)
 		content += conts
-		validation += valids
+		oldValidation += oldValids
+		newValidation += newValids
 	}
 	for _, group := range v.Groups {
 		fieldType := getBasefromSimpleType(trimNSPrefix(group.Ref), gen.ProtoTree)
-		conts, valids := genRustFieldCode(group.Name, fieldType, group.Plural, false, nil, false, false)
+		conts, oldValids, newValids, _ := genRustFieldCode(group.Name, fieldType, group.Plural, false, nil, false, false)
 		content += conts
-		validation += valids
+		oldValidation += oldValids
+		newValidation += newValids
 	}
 	for _, element := range v.Elements {
 		var r *Restriction
@@ -396,16 +609,18 @@ func (gen *CodeGenerator) RustComplexType(v *ComplexType) {
 			r = &element.Restriction
 		}
 
-		conts, valids := genRustFieldCode(element.Name, fieldType, element.Plural, element.Optional, r, false, false)
+		conts, oldValids, newValids, _ := genRustFieldCode(element.Name, fieldType, element.Plural, element.Optional, r, false, false)
 		content += conts
-		validation += valids
+		oldValidation += oldValids
+		newValidation += newValids
 	}
 	if len(v.Base) > 0 {
 		fieldType := getBasefromSimpleType(trimNSPrefix(v.Base), gen.ProtoTree)
 		if isRustBuiltInType(v.Base) {
-			conts, valids := genRustFieldCode("value", fieldType, false, false, nil, false, false)
+			conts, oldValids, newValids, _ := genRustFieldCode("value", fieldType, false, false, nil, false, false)
 			content += conts
-			validation += valids
+			oldValidation += oldValids
+			newValidation += newValids
 		} else {
 			fmt.Printf("\n\n%s\n", fieldType)
 			fieldName := genRustFieldName(fieldType)
@@ -416,7 +631,7 @@ func (gen *CodeGenerator) RustComplexType(v *ComplexType) {
 
 	if _, ok := gen.StructAST[v.Name]; !ok {
 		gen.StructAST[v.Name] = content
-		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], validation, false)
+		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], oldValidation, newValidation, false)
 	} else {
 		fmt.Printf("%s\n", content)
 	}
@@ -430,21 +645,23 @@ func isRustBuiltInType(typeName string) bool {
 // RustGroup generates code for group XML schema in Rust language syntax.
 func (gen *CodeGenerator) RustGroup(v *Group) {
 	if _, ok := gen.StructAST[v.Name]; !ok {
-		var content, validation string
+		var content, oldValidation, newValidation string
 		for _, element := range v.Elements {
 			fieldType := getBasefromSimpleType(trimNSPrefix(element.Type), gen.ProtoTree)
-			conts, valids := genRustFieldCode(element.Name, fieldType, element.Plural, element.Optional, &element.Restriction, false, false)
+			conts, oldValids, newValids, _ := genRustFieldCode(element.Name, fieldType, element.Plural, element.Optional, &element.Restriction, false, false)
 			content += conts
-			validation += valids
+			oldValidation += oldValids
+			newValidation += newValids
 		}
 		for _, group := range v.Groups {
 			fieldType := getBasefromSimpleType(trimNSPrefix(group.Ref), gen.ProtoTree)
-			conts, valids := genRustFieldCode(group.Name, fieldType, group.Plural, false, nil, false, false)
+			conts, oldValids, newValids, _ := genRustFieldCode(group.Name, fieldType, group.Plural, false, nil, false, false)
 			content += conts
-			validation += valids
+			oldValidation += oldValids
+			newValidation += newValids
 		}
 		gen.StructAST[v.Name] = content
-		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], validation, false)
+		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], oldValidation, newValidation, false)
 	}
 }
 
@@ -452,15 +669,16 @@ func (gen *CodeGenerator) RustGroup(v *Group) {
 // syntax.
 func (gen *CodeGenerator) RustAttributeGroup(v *AttributeGroup) {
 	if _, ok := gen.StructAST[v.Name]; !ok {
-		var content, validation string
+		var content, oldValidation, newValidation string
 		for _, attribute := range v.Attributes {
 			fieldType := getBasefromSimpleType(trimNSPrefix(attribute.Type), gen.ProtoTree)
-			conts, valids := genRustFieldCode(attribute.Name, fieldType, attribute.Plural, attribute.Optional, &attribute.Restriction, false, false)
+			conts, oldValids, newValids, _ := genRustFieldCode(attribute.Name, fieldType, attribute.Plural, attribute.Optional, &attribute.Restriction, false, false)
 			content += conts
-			validation += valids
+			oldValidation += oldValids
+			newValidation += newValids
 		}
 		gen.StructAST[v.Name] = content
-		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], validation, false)
+		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], oldValidation, newValidation, false)
 	}
 }
 
@@ -468,9 +686,9 @@ func (gen *CodeGenerator) RustAttributeGroup(v *AttributeGroup) {
 func (gen *CodeGenerator) RustElement(v *Element) {
 	if _, ok := gen.StructAST[v.Name]; !ok {
 		fieldType := getBasefromSimpleType(trimNSPrefix(v.Type), gen.ProtoTree)
-		content, validation := genRustFieldCode(v.Name, fieldType, v.Plural, v.Optional, &v.Restriction, false, false)
+		content, oldValidation, newValidation, _ := genRustFieldCode(v.Name, fieldType, v.Plural, v.Optional, &v.Restriction, false, false)
 		gen.StructAST[v.Name] = content
-		gen.Field += genRustStructCode(genRustFieldName(v.Name), v.Doc, gen.StructAST[v.Name], validation, false)
+		gen.Field += genRustStructCode(genRustFieldName(v.Name), v.Doc, gen.StructAST[v.Name], oldValidation, newValidation, false)
 	}
 }
 
@@ -478,9 +696,9 @@ func (gen *CodeGenerator) RustElement(v *Element) {
 func (gen *CodeGenerator) RustAttribute(v *Attribute) {
 	if _, ok := gen.StructAST[v.Name]; !ok {
 		fieldType := getBasefromSimpleType(trimNSPrefix(v.Type), gen.ProtoTree)
-		content, validation := genRustFieldCode(v.Name, fieldType, v.Plural, v.Optional, &v.Restriction, false, false)
+		content, oldValidation, newValidation, _ := genRustFieldCode(v.Name, fieldType, v.Plural, v.Optional, &v.Restriction, false, false)
 		gen.StructAST[v.Name] = content
-		gen.Field += genRustStructCode(genRustFieldName(v.Name), v.Doc, gen.StructAST[v.Name], validation, false)
+		gen.Field += genRustStructCode(genRustFieldName(v.Name), v.Doc, gen.StructAST[v.Name], oldValidation, newValidation, false)
 	}
 }
 
