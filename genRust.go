@@ -359,8 +359,16 @@ func genCustomTypeValidationWithPath(fieldName string, xmlName string, fieldType
 	return validations
 }
 
+// OldValidationResult holds the separated regex setup and validation body code
+type OldValidationResult struct {
+	RegexSetup string // Code to create regex (should be outside loops)
+	LoopBody   string // Validation code (can be inside loops)
+}
+
 // Old validation code generation for backward compatibility validate() method
-func getOldValidationCode(variable string, fieldName string, fieldType string, restriction *Restriction) string {
+// Returns regex setup code separately to avoid compiling regex inside loops
+func getOldValidationCode(variable string, fieldName string, fieldType string, restriction *Restriction) OldValidationResult {
+	result := OldValidationResult{}
 	validations := ""
 
 	// Handle minLength and maxLength for string types
@@ -396,9 +404,10 @@ func getOldValidationCode(variable string, fieldName string, fieldType string, r
 	}
 
 	// Handle pattern constraints for string types
+	// Regex creation is returned separately to be placed outside loops
 	if restriction.Pattern != nil && fieldType == "String" {
 		patternStr := escapeRustString(restriction.Pattern.String())
-		validations += fmt.Sprintf("let pattern = Regex::new(\"%s\").unwrap();\n", patternStr)
+		result.RegexSetup = fmt.Sprintf("let pattern = Regex::new(\"%s\").unwrap();\n", patternStr)
 		if variable == "val" {
 			validations += fmt.Sprintf("if !pattern.is_match(%s) {\n", variable)
 		} else {
@@ -413,7 +422,8 @@ func getOldValidationCode(variable string, fieldName string, fieldType string, r
 		validations = validations[:i]
 	}
 
-	return validations
+	result.LoopBody = validations
+	return result
 }
 
 // Helper function to generate old validation for built-in types
@@ -422,28 +432,47 @@ func genBuiltInOldValidation(fieldName string, fieldType string, restriction *Re
 
 	// Handle plural (Vec) case for built-in types
 	if plural {
-		v := getOldValidationCode("item", fieldName, fieldType, restriction)
-		if len(v) > 0 {
+		result := getOldValidationCode("item", fieldName, fieldType, restriction)
+		if len(result.LoopBody) > 0 || len(result.RegexSetup) > 0 {
 			if optional {
 				// Handle Option<Vec<T>> for built-in types
-				validations += fmt.Sprintf("if let Some(ref vec) = self.%s {\n\tfor item in vec {\n\t\t%s\n\t}\n}\n", fieldName, strings.ReplaceAll(v, "\n", "\n\t\t"))
+				// Place regex setup outside the loop but inside the if-let
+				validations += fmt.Sprintf("if let Some(ref vec) = self.%s {\n", fieldName)
+				if len(result.RegexSetup) > 0 {
+					validations += fmt.Sprintf("\t%s", result.RegexSetup)
+				}
+				validations += fmt.Sprintf("\tfor item in vec {\n\t\t%s\n\t}\n}\n", strings.ReplaceAll(result.LoopBody, "\n", "\n\t\t"))
 			} else {
 				// Handle Vec<T> for built-in types
-				validations += fmt.Sprintf("for item in &self.%s {\n\t%s\n}\n", fieldName, strings.ReplaceAll(v, "\n", "\n\t"))
+				// Place regex setup outside the loop
+				if len(result.RegexSetup) > 0 {
+					validations += result.RegexSetup
+				}
+				validations += fmt.Sprintf("for item in &self.%s {\n\t%s\n}\n", fieldName, strings.ReplaceAll(result.LoopBody, "\n", "\n\t"))
 			}
 		}
 	} else {
 		// Handle Option<T> case
 		if optional {
-			v := getOldValidationCode("val", fieldName, fieldType, restriction)
-			if len(v) > 0 {
-				validations += fmt.Sprintf("if let Some(ref val) = self.%s {\n\t%s\n}\n", fieldName, strings.ReplaceAll(v, "\n", "\n\t"))
+			result := getOldValidationCode("val", fieldName, fieldType, restriction)
+			if len(result.LoopBody) > 0 || len(result.RegexSetup) > 0 {
+				validations += fmt.Sprintf("if let Some(ref val) = self.%s {\n", fieldName)
+				if len(result.RegexSetup) > 0 {
+					validations += fmt.Sprintf("\t%s", result.RegexSetup)
+				}
+				if len(result.LoopBody) > 0 {
+					validations += fmt.Sprintf("\t%s\n", strings.ReplaceAll(result.LoopBody, "\n", "\n\t"))
+				}
+				validations += "}\n"
 			}
 		} else {
 			// Handle T case
-			v := getOldValidationCode(fmt.Sprintf("self.%s", fieldName), fieldName, fieldType, restriction)
-			if len(v) > 0 {
-				validations += v + "\n"
+			result := getOldValidationCode(fmt.Sprintf("self.%s", fieldName), fieldName, fieldType, restriction)
+			if len(result.RegexSetup) > 0 {
+				validations += result.RegexSetup
+			}
+			if len(result.LoopBody) > 0 {
+				validations += result.LoopBody + "\n"
 			}
 		}
 	}
